@@ -1,0 +1,12 @@
+# Runtime dependencies for the API image (no datasets, no pytest)
+groq
+instructor
+pydantic
+pydantic-settings
+neo4j
+sentence-transformers
+pandas
+scikit-learn
+langchain-text-splitters
+fastapi
+uvicorn

@@ -1,0 +1,14 @@
+venv/
+.git/
+.github/
+.env
+.env.*
+data/
+tests/
+scripts/
+__pycache__/
+*.pyc
+.pytest_cache/
+.vscode/
+README.md
+DEPLOYMENT.md
