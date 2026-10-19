@@ -29,6 +29,11 @@ Visitors upload `.txt`, `.md` or `.pdf` files and ask questions. Each visitor ge
 (an unguessable cookie); the shared demo corpus is searchable by everyone. Limits and daily budgets are
 settings (see `graphrag/config.py`). `/docs` lists the HTTP API. See DEPLOYMENT.md before making it public.
 
+Share it publicly for free from your own machine (no cloud account or card; closes when you press Ctrl-C):
+```bash
+brew install cloudflared && scripts/share_public.sh
+```
+
 ## Run
 ```bash
 python -m scripts.prepare_corpus --per-category 100   # build data/raw/corpus.csv

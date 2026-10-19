@@ -137,7 +137,8 @@ def create_app(
             if owned is not None:
                 owned.close()
 
-    app = FastAPI(title="Graph RAG", version="2.0.0", lifespan=lifespan)
+    docs = None if settings.docs_enabled else {"docs_url": None, "redoc_url": None, "openapi_url": None}
+    app = FastAPI(title="Graph RAG", version="2.0.0", lifespan=lifespan, **(docs or {}))
 
     # ── cross-cutting: security headers and request size ─────────────────────
     @app.middleware("http")

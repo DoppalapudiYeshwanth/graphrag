@@ -78,6 +78,13 @@ def test_api_docs_page_is_not_given_the_strict_csp(settings_env) -> None:
         assert "content-security-policy" not in client.get("/docs").headers  # swagger needs a CDN
 
 
+def test_docs_can_be_disabled_for_public_runs(settings_env) -> None:
+    client, *_ = make_client(settings_env, DOCS_ENABLED="false")
+    with client:
+        assert [client.get(p).status_code for p in ("/docs", "/redoc", "/openapi.json")] == [404] * 3
+        assert client.get("/health").status_code == 200  # the app itself is unaffected
+
+
 # ── workspace listing ────────────────────────────────────────────────────────
 def test_workspace_starts_empty_and_reports_limits_and_capacity(settings_env) -> None:
     client, *_ = make_client(settings_env, MAX_DOCS_PER_WORKSPACE="3")

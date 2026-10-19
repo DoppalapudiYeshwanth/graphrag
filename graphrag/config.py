@@ -86,6 +86,7 @@ class Settings(BaseSettings):
     workspace_ttl_days: float = Field(7.0, gt=0, description="Idle workspaces are deleted after this.")
 
     # API service
+    docs_enabled: bool = Field(True, description="Serve /docs and /openapi.json. Disable when public.")
     api_key: SecretStr | None = Field(None, description="If set, /ask requires header X-API-Key.")
     rate_limit_per_minute: int = Field(20, gt=0, description="Per client, per instance.")
     max_question_chars: int = Field(500, gt=0)

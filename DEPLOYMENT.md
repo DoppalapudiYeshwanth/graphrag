@@ -14,6 +14,55 @@ browser --cookie--> Cloud Run (FastAPI: web page + /api/*  +  /ask) --bolt+s--> 
 > AuraDB and Cloud Run steps were NOT executed by the author; they use standard `gcloud` and Aura
 > flows. Free-tier limits and console wording change, so check each against current provider docs.
 
+## Choose a route (read first)
+
+| Route | Card on file? | Can it bill you? | Always on? | Status |
+| --- | --- | --- | --- | --- |
+| **A. Your machine + free Cloudflare tunnel** (below) | No | No | Only while your Mac runs the script | **Built and tested end to end** |
+| B. Render free web service | Unverified (the docs do not say) | Docs say overage charges are possible when a payment method exists | Sleeps after 15 idle minutes | Not built; likely needs a slimmer app (about 512 MB RAM, unverified) |
+| C. Google Cloud Run + AuraDB (sections 0 to 11) | Yes (an open billing account) | Yes: Google has no hard cap, only alerts | Yes, scales to zero | Guide written, not run (your billing accounts are closed) |
+| D. Hugging Face Docker Space | Needs a paid plan | n/a | n/a | **Not viable**: Docker Spaces require a paid plan, and free Spaces only reach ports 80, 443 and 8080, so Aura (port 7687) is blocked |
+
+Rule of thumb for "never bill me": if no service in the chain has your payment method, nothing can bill you.
+
+## Route A: share from your own machine (free, no card, no account)
+
+```bash
+brew install cloudflared            # once
+scripts/share_public.sh             # prints a public https URL; Ctrl-C closes it
+```
+
+What the script does: starts your local Neo4j container, starts the app on `127.0.0.1` only, keeps the
+Mac awake while it runs, and opens a Cloudflare quick tunnel. Nothing is deployed anywhere, and the
+URL is random and changes every run.
+
+Safety applied automatically while public:
+
+| Control | Value |
+| --- | --- |
+| Daily caps, shared by all visitors | 60 questions and 100 upload chunks (override with `DAILY_ASK_BUDGET`, `DAILY_CHUNK_BUDGET`) |
+| `/docs` and `/openapi.json` | Hidden (`DOCS_ENABLED=false`) |
+| Programmatic `/ask` | Needs a random `API_KEY` created fresh each run |
+| Database | Never exposed; only the app port goes through the tunnel |
+| Visitor addresses | Taken from proxy headers, so per-visitor rate limits work |
+| Cookies | `Secure`, `HttpOnly`, `SameSite=Lax` over https |
+| Retention | Idle visitor workspaces are deleted on each start |
+
+Tested through a real tunnel: health, headers, hidden docs, 401 without a key, database not reachable,
+streamed upload progress, a private answer with citations, and cleanup. The tunnel closes cleanly on Ctrl-C.
+
+Know the limits:
+- **The site is up only while the script runs and your Mac is awake and online.**
+- Quick tunnels have **no uptime guarantee**. A brand-new URL can take up to a minute to resolve on your
+  machine (a stale DNS cache); other networks usually see it sooner.
+- **You are hosting other people's uploads on your machine.** Do not leave it running unattended, and do
+  not advertise it for sensitive documents. Uploaded text goes to Groq.
+- Capacity is the free Groq quota. When the daily caps are reached, visitors get a clear message.
+
+To share the URL for a limited time: run the script, send the link, and press Ctrl-C when you are done.
+
+The rest of this guide (sections 0 to 11) covers Route C.
+
 ## 0. What you are about to make public
 
 Read this before you deploy; it is what separates a demo from an incident.
