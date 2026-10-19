@@ -157,6 +157,9 @@ Rules:
 - Prefer fewer, high-quality items over exhaustive noisy ones. Return empty lists if nothing fits."""
 
 
+MODEL_RETRY_AFTER_S = 3600.0
+
+
 class QuotaExhaustedError(RuntimeError):
     """Raised when every model in the chain has used up its daily token quota."""
 
@@ -194,6 +197,7 @@ class GraphExtractor:
         self._settings = s
         self._chain: list[str] = s.model_chain
         self._idx = 0
+        self._advanced_at = 0.0
         self._client = instructor.from_groq(
             Groq(api_key=s.groq_api_key.get_secret_value()),
             mode=instructor.Mode.JSON,
@@ -201,12 +205,18 @@ class GraphExtractor:
 
     @property
     def current_model(self) -> str:
+        # A long-running server must not stay on a fallback forever: daily quotas reset,
+        # so after an hour we try the primary model again.
+        if self._idx > 0 and time.monotonic() - self._advanced_at > MODEL_RETRY_AFTER_S:
+            logger.info("Retrying primary model %s", self._chain[0])
+            self._idx = 0
         return self._chain[self._idx]
 
     def _advance_model(self, exc: BaseException) -> None:
         """Move to the next model in the chain, or raise when none are left."""
         logger.warning("Model %s unusable (%s); trying next", self.current_model, str(exc)[:120])
         self._idx += 1
+        self._advanced_at = time.monotonic()
         if self._idx >= len(self._chain):
             raise QuotaExhaustedError(
                 f"All models exhausted or unavailable: {', '.join(self._chain)}"

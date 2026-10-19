@@ -16,7 +16,7 @@ class FakeRag:
         self.error = error
         self.questions: list[str] = []
 
-    def ask(self, question: str) -> Answer:
+    def ask(self, question: str, scopes: list[str] | None = None) -> Answer:
         self.questions.append(question)
         if self.error:
             raise self.error

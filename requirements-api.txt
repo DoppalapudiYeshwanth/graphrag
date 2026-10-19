@@ -10,3 +10,5 @@ scikit-learn
 langchain-text-splitters
 fastapi
 uvicorn
+python-multipart
+pypdf

@@ -92,3 +92,5 @@ yarl==1.25.1
 zstandard==0.25.0
 fastapi
 uvicorn
+python-multipart
+pypdf

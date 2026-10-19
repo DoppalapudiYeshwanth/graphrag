@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Graph RAG: ask your documents</title>
+  <meta name="description" content="Upload documents and ask questions. Answers cite their sources and show the knowledge graph behind them.">
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+  <header class="top">
+    <div class="wrap">
+      <h1>Graph RAG</h1>
+      <p>Upload a document and ask questions about it. Every answer cites its sources and shows the knowledge-graph facts it used.</p>
+    </div>
+  </header>
+
+  <main class="wrap layout">
+    <section class="panel" aria-labelledby="docs-h">
+      <h2 id="docs-h">Your documents</h2>
+
+      <div id="dropzone" class="dropzone" tabindex="0" role="button" aria-label="Upload a document: drop a file or press Enter to choose one">
+        <p><strong>Drop a file here</strong> or click to choose</p>
+        <p class="muted">.txt, .md or .pdf, up to <span id="lim-chars">15,000</span> characters</p>
+        <input id="file" type="file" accept=".txt,.md,.pdf" hidden>
+      </div>
+
+      <div id="upload-status" class="status" role="status" aria-live="polite" hidden>
+        <div class="bar" aria-hidden="true"><div id="bar-fill"></div></div>
+        <p id="status-text"></p>
+      </div>
+
+      <ul id="doc-list" class="docs"></ul>
+      <p id="docs-empty" class="muted">No documents yet. You can still ask about the demo corpus.</p>
+      <button id="delete-all" class="link danger" type="button" hidden>Delete all my documents</button>
+
+      <p class="notice">
+        Documents are private to this browser and deleted after <span id="ttl">7</span> idle days.
+        Their text is processed by a third-party AI service (Groq), so do not upload anything sensitive.
+      </p>
+    </section>
+
+    <section class="panel" aria-labelledby="ask-h">
+      <h2 id="ask-h">Ask a question</h2>
+
+      <fieldset class="scope">
+        <legend>Search in</legend>
+        <label><input type="radio" name="scope" value="both" checked> Both</label>
+        <label><input type="radio" name="scope" value="mine"> My documents</label>
+        <label><input type="radio" name="scope" value="demo"> Demo corpus (400 arXiv abstracts)</label>
+      </fieldset>
+
+      <form id="ask-form">
+        <label for="question" class="sr">Your question</label>
+        <textarea id="question" rows="3" maxlength="500" required
+          placeholder="e.g. How is homomorphic encryption used to protect biometric data?"></textarea>
+        <div class="row">
+          <button id="ask-btn" class="primary" type="submit">Ask</button>
+          <span id="capacity" class="muted"></span>
+        </div>
+      </form>
+
+      <div id="examples" class="chips" aria-label="Example questions"></div>
+      <div id="error" class="error" role="alert" hidden></div>
+      <div id="results" aria-live="polite"></div>
+    </section>
+  </main>
+
+  <footer class="wrap muted">
+    Retrieval combines vector search with a knowledge graph. Answers can be wrong, so check the cited passages.
+  </footer>
+
+  <script src="/static/app.js" defer></script>
+</body>
+</html>

@@ -75,6 +75,16 @@ class Settings(BaseSettings):
     )
     answer_max_tokens: int = Field(1024, gt=0)
 
+    # Web uploads (private per-visitor workspaces)
+    max_upload_bytes: int = Field(2_000_000, gt=0)
+    max_doc_chars: int = Field(15_000, gt=0, description="Longest accepted document text.")
+    max_docs_per_workspace: int = Field(5, gt=0)
+    daily_chunk_budget: int = Field(250, ge=0, description="Shared cap on chunks extracted per day.")
+    daily_ask_budget: int = Field(150, ge=0, description="Shared cap on web questions per day.")
+    max_concurrent_ingests: int = Field(2, gt=0)
+    upload_limit_per_hour: int = Field(6, gt=0, description="Uploads per visitor per hour.")
+    workspace_ttl_days: float = Field(7.0, gt=0, description="Idle workspaces are deleted after this.")
+
     # API service
     api_key: SecretStr | None = Field(None, description="If set, /ask requires header X-API-Key.")
     rate_limit_per_minute: int = Field(20, gt=0, description="Per client, per instance.")

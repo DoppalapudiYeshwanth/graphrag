@@ -10,7 +10,7 @@ from groq import Groq
 from pydantic import BaseModel, Field
 
 from graphrag.config import get_settings
-from graphrag.graph import GraphStore
+from graphrag.graph import PUBLIC, GraphStore
 
 logger = logging.getLogger(__name__)
 
@@ -65,10 +65,15 @@ class GraphRetriever:
         self._s = get_settings()
         self._mode = expansion_mode or self._s.expansion_mode
 
-    def retrieve(self, question: str) -> RetrievalContext:
-        """Vector search, then expand through the entity graph."""
+    def retrieve(self, question: str, scopes: list[str] | None = None) -> RetrievalContext:
+        """Vector search, then expand through the entity graph.
+
+        `scopes` limits every step to the given corpora ("public" and/or a workspace id);
+        the default is the public corpus only.
+        """
         s = self._s
-        hits = self._store.vector_search(question, s.top_k)
+        scopes = scopes or [PUBLIC]
+        hits = self._store.vector_search(question, s.top_k, scopes=scopes)
         chunks = [
             RetrievedChunk(
                 chunk_id=h["chunk_id"], doc_id=h["doc_id"], text=h["text"], score=h["score"]
@@ -84,7 +89,7 @@ class GraphRetriever:
             expand = (
                 self._co_mention_chunks if self._mode == "co_mention" else self._expansion_chunks
             )
-            chunks.extend(expand(ids))
+            chunks.extend(expand(ids, scopes))
         return RetrievalContext(chunks=chunks, facts=facts)
 
     def _run(self, cypher: str, **params: Any) -> list[dict[str, Any]]:
@@ -116,25 +121,36 @@ class GraphRetriever:
             for r in rows
         ]
 
-    def _expansion_chunks(self, chunk_ids: list[str]) -> list[RetrievedChunk]:
+    def _expansion_chunks(
+        self, chunk_ids: list[str], scopes: list[str] | None = None
+    ) -> list[RetrievedChunk]:
         """Chunks reached by hopping chunk -> entity -> related entity -> chunk."""
         rows = self._run(
             """
             MATCH (c:Chunk)-[:MENTIONS]->(:Entity)-[r]-(n:Entity)<-[:MENTIONS]-(other:Chunk)
             WHERE c.chunk_id IN $ids AND NOT other.chunk_id IN $ids
+              AND coalesce(other.workspace, 'public') IN $scopes
             WITH other, count(DISTINCT n) AS strength
             ORDER BY strength DESC
             LIMIT $limit
             RETURN other.chunk_id AS chunk_id, other.doc_id AS doc_id, other.text AS text
             """,
             ids=chunk_ids,
+            scopes=scopes or [PUBLIC],
             limit=self._s.expansion_chunks,
         )
         return [RetrievedChunk(via="graph", **r) for r in rows]
 
-    def _co_mention_chunks(self, chunk_ids: list[str]) -> list[RetrievedChunk]:
+    def _co_mention_chunks(
+        self, chunk_ids: list[str], scopes: list[str] | None = None
+    ) -> list[RetrievedChunk]:
         """Chunks that mention the same entities as the seed chunks (shared-entity hop)."""
-        rows = self._run(_co_mention_query(), ids=chunk_ids, limit=self._s.expansion_chunks)
+        rows = self._run(
+            _co_mention_query(),
+            ids=chunk_ids,
+            scopes=scopes or [PUBLIC],
+            limit=self._s.expansion_chunks,
+        )
         return [RetrievedChunk(via="graph", **r) for r in rows]
 
 
@@ -143,6 +159,7 @@ def _co_mention_query() -> str:
     return """
     MATCH (c:Chunk)-[:MENTIONS]->(e:Entity)<-[:MENTIONS]-(other:Chunk)
     WHERE c.chunk_id IN $ids AND NOT other.chunk_id IN $ids
+      AND coalesce(other.workspace, 'public') IN $scopes
     WITH other, sum(1.0 / COUNT { (e)<-[:MENTIONS]-() }) AS strength
     ORDER BY strength DESC
     LIMIT $limit
@@ -166,8 +183,8 @@ class GraphRAG:
         self._retriever = GraphRetriever(store)
         self._llm = Groq(api_key=s.groq_api_key.get_secret_value())
 
-    def ask(self, question: str) -> Answer:
-        ctx = self._retriever.retrieve(question)
+    def ask(self, question: str, scopes: list[str] | None = None) -> Answer:
+        ctx = self._retriever.retrieve(question, scopes)
         if not ctx.chunks:
             return Answer(question=question, answer="No relevant context found.", context=ctx)
 

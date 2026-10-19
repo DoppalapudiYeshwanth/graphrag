@@ -21,6 +21,14 @@ docker run -d --name neo4j-graphrag -p 7474:7474 -p 7687:7687 \
 cp .env.example .env   # then set GROQ_API_KEY
 ```
 
+## Web app
+```bash
+uvicorn graphrag.api:app --port 8000      # then open http://localhost:8000
+```
+Visitors upload `.txt`, `.md` or `.pdf` files and ask questions. Each visitor gets a private workspace
+(an unguessable cookie); the shared demo corpus is searchable by everyone. Limits and daily budgets are
+settings (see `graphrag/config.py`). `/docs` lists the HTTP API. See DEPLOYMENT.md before making it public.
+
 ## Run
 ```bash
 python -m scripts.prepare_corpus --per-category 100   # build data/raw/corpus.csv
@@ -28,6 +36,7 @@ python -m scripts.build_graph --reset                 # extract + embed + load (
 python -m scripts.ask "How is homomorphic encryption used to protect biometric data?" --show-context
 python -m scripts.make_eval_set --n 40                # generate eval questions
 python -m scripts.evaluate                            # hit@k, MRR, vector vs vector+graph
+python -m scripts.cleanup_workspaces --dry-run        # idle visitor workspaces
 ```
 
 ## Notes

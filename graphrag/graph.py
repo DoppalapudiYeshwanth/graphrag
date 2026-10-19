@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import re
 from collections import defaultdict
+from datetime import datetime, timezone
 from types import TracebackType
 from typing import Any, Iterator, Sequence
 
@@ -17,8 +18,17 @@ from graphrag.models import ExtractionResult, normalize_name
 
 logger = logging.getLogger(__name__)
 
+PUBLIC = "public"  # scope name of the shared demo corpus (nodes with no `workspace` property)
+_WORKSPACE_ID = re.compile(r"^[a-f0-9]{32}$")
+
 _IDENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _REL_TYPE = re.compile(r"^[A-Z][A-Z0-9_]*$")
+
+
+def _check_workspace(workspace: str | None) -> None:
+    """Workspace ids are random 32-hex strings; anything else is rejected before a query."""
+    if workspace is not None and not _WORKSPACE_ID.match(workspace):
+        raise ValueError("invalid workspace id")
 
 
 def _batched(items: Sequence[Any], size: int) -> Iterator[Sequence[Any]]:
@@ -85,6 +95,10 @@ class GraphStore:
             "CREATE CONSTRAINT doc_id IF NOT EXISTS FOR (d:Document) REQUIRE d.doc_id IS UNIQUE",
             "CREATE CONSTRAINT chunk_id IF NOT EXISTS FOR (c:Chunk) REQUIRE c.chunk_id IS UNIQUE",
             "CREATE CONSTRAINT entity_key IF NOT EXISTS FOR (e:Entity) REQUIRE e.key IS UNIQUE",
+            "CREATE CONSTRAINT budget_id IF NOT EXISTS FOR (b:Budget) REQUIRE b.id IS UNIQUE",
+            "CREATE INDEX chunk_workspace IF NOT EXISTS FOR (c:Chunk) ON (c.workspace)",
+            "CREATE INDEX document_workspace IF NOT EXISTS FOR (d:Document) ON (d.workspace)",
+            "CREATE INDEX entity_workspace IF NOT EXISTS FOR (e:Entity) ON (e.workspace)",
             f"""
             CREATE VECTOR INDEX {s.vector_index_name} IF NOT EXISTS
             FOR (c:Chunk) ON (c.embedding)
@@ -101,18 +115,44 @@ class GraphStore:
         logger.info("Schema ready (constraints + vector index '%s')", s.vector_index_name)
 
     # ── writes ───────────────────────────────────────────────────────────────
-    def upsert_chunks(self, chunks: list[Chunk], batch_size: int = 100) -> None:
-        """Embed chunks and upsert Document -> Chunk nodes."""
+    def upsert_chunks(
+        self,
+        chunks: list[Chunk],
+        batch_size: int = 100,
+        workspace: str | None = None,
+        title: str | None = None,
+    ) -> None:
+        """Embed chunks and upsert Document -> Chunk nodes.
+
+        `workspace=None` writes to the shared public corpus; a workspace id makes the
+        documents and chunks private to that workspace.
+        """
+        _check_workspace(workspace)
         for batch in _batched(chunks, batch_size):
             vectors = self._embedder.embed([c.text for c in batch])
-            rows = [{**c.model_dump(), "embedding": v} for c, v in zip(batch, vectors)]
+            rows = [
+                {**c.model_dump(), "embedding": v, "workspace": workspace, "title": title}
+                for c, v in zip(batch, vectors)
+            ]
             self._write(self._tx_upsert_chunks, rows)
         logger.info("Upserted %d chunks", len(chunks))
 
     def upsert_extractions(
-        self, extractions: dict[str, ExtractionResult], batch_size: int = 500
+        self,
+        extractions: dict[str, ExtractionResult],
+        batch_size: int = 500,
+        workspace: str | None = None,
     ) -> None:
-        """Upsert Entity nodes, MENTIONS edges, and typed entity-entity edges."""
+        """Upsert Entity nodes, MENTIONS edges, and typed entity-entity edges.
+
+        In a workspace, entity keys are prefixed with the workspace id, so two users who
+        mention the same concept never share (or see) each other's entity nodes.
+        """
+        _check_workspace(workspace)
+
+        def scoped(key: str) -> str:
+            return f"{workspace}::{key}" if workspace else key
+
         entity_rows: list[dict[str, Any]] = []
         rels_by_type: dict[str, list[dict[str, Any]]] = defaultdict(list)
 
@@ -121,10 +161,11 @@ class GraphStore:
                 entity_rows.append(
                     {
                         "chunk_id": chunk_id,
-                        "key": e.key,
+                        "key": scoped(e.key),
                         "name": e.name,
                         "type": e.type,
                         "description": e.description,
+                        "workspace": workspace,
                     }
                 )
             for r in result.relationships:
@@ -134,8 +175,8 @@ class GraphStore:
                 rels_by_type[r.type].append(
                     {
                         "chunk_id": chunk_id,
-                        "source": normalize_name(r.source),
-                        "target": normalize_name(r.target),
+                        "source": scoped(normalize_name(r.source)),
+                        "target": scoped(normalize_name(r.target)),
                         "description": r.description,
                     }
                 )
@@ -153,20 +194,49 @@ class GraphStore:
         )
 
     # ── reads ────────────────────────────────────────────────────────────────
-    def vector_search(self, query: str, top_k: int | None = None) -> list[dict[str, Any]]:
-        """Return the top-k chunks most similar to `query`."""
-        k = top_k or self._s.top_k
-        qvec = self._embedder.embed([query])[0]
-        cypher = """
-        CALL db.index.vector.queryNodes($index, $k, $qvec) YIELD node, score
-        RETURN node.chunk_id AS chunk_id, node.doc_id AS doc_id,
-               node.category AS category, node.text AS text, score
-        ORDER BY score DESC
+    def vector_search(
+        self, query: str, top_k: int | None = None, scopes: list[str] | None = None
+    ) -> list[dict[str, Any]]:
+        """Return the top-k chunks most similar to `query`, restricted to `scopes`.
+
+        `scopes` lists the visible corpora: "public" (the shared demo corpus) and/or one
+        workspace id. Default: public only. The public corpus is searched through the
+        vector index; a private workspace is small, so it is scanned exactly (an index
+        query cannot filter by workspace, and could miss a user's few chunks entirely).
         """
+        k = top_k or self._s.top_k
+        scopes = scopes or [PUBLIC]
+        for scope in scopes:
+            if scope != PUBLIC:
+                _check_workspace(scope)
+        qvec = self._embedder.embed([query])[0]
+        hits: list[dict[str, Any]] = []
+
         with self._driver.session(database=self._s.neo4j_database) as session:
-            return session.run(
-                cypher, index=self._s.vector_index_name, k=k, qvec=qvec
-            ).data()
+            if PUBLIC in scopes:
+                hits += session.run(
+                    """
+                    CALL db.index.vector.queryNodes($index, $raw_k, $qvec) YIELD node, score
+                    WHERE node.workspace IS NULL
+                    RETURN node.chunk_id AS chunk_id, node.doc_id AS doc_id,
+                           node.category AS category, node.text AS text, score
+                    ORDER BY score DESC LIMIT $k
+                    """,
+                    index=self._s.vector_index_name, raw_k=min(k * 10, 500), k=k, qvec=qvec,
+                ).data()
+            for ws in (s for s in scopes if s != PUBLIC):
+                hits += session.run(
+                    """
+                    MATCH (c:Chunk {workspace: $ws})
+                    WITH c, vector.similarity.cosine(c.embedding, $qvec) AS score
+                    RETURN c.chunk_id AS chunk_id, c.doc_id AS doc_id,
+                           c.category AS category, c.text AS text, score
+                    ORDER BY score DESC LIMIT $k
+                    """,
+                    ws=ws, qvec=qvec, k=k,
+                ).data()
+        hits.sort(key=lambda h: h["score"], reverse=True)
+        return hits[:k]
 
     def stats(self) -> dict[str, int]:
         """Node/relationship counts for quick sanity checks."""
@@ -188,6 +258,111 @@ class GraphStore:
             session.run("MATCH (n) DETACH DELETE n").consume()
         logger.warning("Graph cleared")
 
+    # ── workspaces (private, per-visitor documents) ──────────────────────────
+    def list_documents(self, workspace: str) -> list[dict[str, Any]]:
+        """Documents in a workspace, newest first, with their chunk counts."""
+        _check_workspace(workspace)
+        with self._driver.session(database=self._s.neo4j_database) as session:
+            return session.run(
+                """
+                MATCH (d:Document {workspace: $ws})
+                OPTIONAL MATCH (d)-[:HAS_CHUNK]->(c:Chunk)
+                RETURN d.doc_id AS doc_id, d.title AS title, d.created AS created,
+                       count(c) AS chunks
+                ORDER BY d.created DESC
+                """,
+                ws=workspace,
+            ).data()
+
+    def delete_document(self, workspace: str, doc_id: str) -> bool:
+        """Delete one document of a workspace (and entities nothing mentions any more)."""
+        _check_workspace(workspace)
+        with self._driver.session(database=self._s.neo4j_database) as session:
+            found = session.run(
+                "MATCH (d:Document {doc_id: $id, workspace: $ws}) RETURN count(d) AS n",
+                id=doc_id, ws=workspace,
+            ).single()["n"]
+            if not found:
+                return False
+            session.run(
+                """
+                MATCH (d:Document {doc_id: $id, workspace: $ws})
+                OPTIONAL MATCH (d)-[:HAS_CHUNK]->(c:Chunk)
+                DETACH DELETE c, d
+                """,
+                id=doc_id, ws=workspace,
+            ).consume()
+            session.run(
+                """
+                MATCH (e:Entity {workspace: $ws}) WHERE NOT EXISTS { (e)<-[:MENTIONS]-() }
+                DETACH DELETE e
+                """,
+                ws=workspace,
+            ).consume()
+        return True
+
+    def delete_workspace(self, workspace: str) -> None:
+        """Delete everything a workspace owns."""
+        _check_workspace(workspace)
+        with self._driver.session(database=self._s.neo4j_database) as session:
+            for label in ("Chunk", "Entity", "Document"):
+                session.run(
+                    f"MATCH (n:{label} {{workspace: $ws}}) DETACH DELETE n", ws=workspace
+                ).consume()
+
+    def stale_workspaces(self, older_than_days: float) -> list[str]:
+        """Workspaces whose newest document is older than the cutoff."""
+        cutoff_ms = int((datetime.now(timezone.utc).timestamp() - older_than_days * 86400) * 1000)
+        with self._driver.session(database=self._s.neo4j_database) as session:
+            rows = session.run(
+                """
+                MATCH (d:Document) WHERE d.workspace IS NOT NULL
+                WITH d.workspace AS ws, max(d.created) AS last
+                WHERE last < $cutoff
+                RETURN ws
+                """,
+                cutoff=cutoff_ms,
+            ).data()
+        return [r["ws"] for r in rows]
+
+    # ── shared daily budgets (persisted, so they hold across instances and restarts) ──
+    @staticmethod
+    def _budget_id(kind: str) -> str:
+        return f"{kind}:{datetime.now(timezone.utc).strftime('%Y-%m-%d')}"
+
+    def reserve_budget(self, kind: str, amount: int, limit: int) -> bool:
+        """Atomically use `amount` of today's `kind` budget; False if it would exceed `limit`."""
+        with self._driver.session(database=self._s.neo4j_database) as session:
+            row = session.run(
+                """
+                MERGE (b:Budget {id: $id})
+                  ON CREATE SET b.used = 0
+                WITH b WHERE b.used + $amount <= $limit
+                SET b.used = b.used + $amount
+                RETURN b.used AS used
+                """,
+                id=self._budget_id(kind), amount=amount, limit=limit,
+            ).single()
+        return row is not None
+
+    def release_budget(self, kind: str, amount: int) -> None:
+        """Give back part of a reservation (for work that did not happen)."""
+        with self._driver.session(database=self._s.neo4j_database) as session:
+            session.run(
+                """
+                MATCH (b:Budget {id: $id})
+                SET b.used = CASE WHEN b.used > $amount THEN b.used - $amount ELSE 0 END
+                """,
+                id=self._budget_id(kind), amount=amount,
+            ).consume()
+
+    def budget_remaining(self, kind: str, limit: int) -> int:
+        with self._driver.session(database=self._s.neo4j_database) as session:
+            row = session.run(
+                "MATCH (b:Budget {id: $id}) RETURN b.used AS used", id=self._budget_id(kind)
+            ).single()
+        return max(limit - (row["used"] if row else 0), 0)
+
     # ── transaction functions ────────────────────────────────────────────────
     def _write(self, fn: Any, *args: Any) -> None:
         with self._driver.session(database=self._s.neo4j_database) as session:
@@ -199,10 +374,13 @@ class GraphStore:
             """
             UNWIND $rows AS row
             MERGE (d:Document {doc_id: row.doc_id})
-              ON CREATE SET d.category = row.category, d.source = row.source
+              ON CREATE SET d.category = row.category, d.source = row.source,
+                            d.workspace = row.workspace, d.title = row.title,
+                            d.created = timestamp()
             MERGE (c:Chunk {chunk_id: row.chunk_id})
               SET c.doc_id = row.doc_id, c.chunk_index = row.chunk_index,
-                  c.text = row.text, c.category = row.category
+                  c.text = row.text, c.category = row.category,
+                  c.workspace = row.workspace
             WITH c, d, row
             CALL db.create.setNodeVectorProperty(c, 'embedding', row.embedding)
             MERGE (d)-[:HAS_CHUNK]->(c)
@@ -217,7 +395,7 @@ class GraphStore:
             UNWIND $rows AS row
             MERGE (e:Entity {key: row.key})
               ON CREATE SET e.name = row.name, e.type = row.type,
-                            e.description = row.description
+                            e.description = row.description, e.workspace = row.workspace
             WITH e, row
             MATCH (c:Chunk {chunk_id: row.chunk_id})
             MERGE (c)-[:MENTIONS]->(e)
