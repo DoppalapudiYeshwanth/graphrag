@@ -14,6 +14,7 @@ Needs the secrets NEO4J_URI, NEO4J_USERNAME and NEO4J_PASSWORD (Streamlit: App s
 
 from __future__ import annotations
 
+import ipaddress
 import platform
 import resource
 import socket
@@ -68,15 +69,42 @@ def load_model() -> str:
 
 st.write(f"Python {sys.version.split()[0]} on {platform.system()} {platform.machine()}")
 
-secrets = st.secrets
+try:
+    secrets = {key: st.secrets[key] for key in st.secrets}
+except Exception:  # no secrets configured at all: Streamlit raises instead of returning an empty mapping
+    secrets = {}
 missing = [k for k in ("NEO4J_URI", "NEO4J_USERNAME", "NEO4J_PASSWORD") if k not in secrets]
 if missing:
     st.error(f"Missing secrets: {', '.join(missing)}. Add them in App settings > Secrets.")
     st.stop()
 
 uri = secrets["NEO4J_URI"]
-host = urlparse(uri).hostname or ""
-st.write(f"Target host: `{host}` (scheme `{urlparse(uri).scheme}`)")
+parsed = urlparse(uri)
+host = parsed.hostname or ""
+st.write(f"Target host: `{host}` (scheme `{parsed.scheme}`)")
+
+
+def points_at_own_machine(name: str) -> bool:
+    """True for localhost and private or loopback addresses: unreachable from a cloud host."""
+    if name in {"", "localhost", "host.docker.internal"}:
+        return True
+    try:
+        address = ipaddress.ip_address(name)
+    except ValueError:
+        return False
+    return address.is_loopback or address.is_private
+
+
+if points_at_own_machine(host):
+    st.error(
+        "These secrets point at your own computer, which this cloud host cannot reach, so every network "
+        "check would fail for the wrong reason. Put your Aura address in NEO4J_URI: it looks like "
+        "`neo4j+s://<id>.databases.neo4j.io` (Aura console, your instance, Connection URI). "
+        "Edit it under the app menu, Settings, Secrets, then reboot the app."
+    )
+    st.stop()
+if not parsed.scheme.endswith(("+s", "+ssc")):
+    st.warning("Aura needs an encrypted address starting with `neo4j+s://`. Plain `bolt://` will be refused.")
 
 results = {
     "DNS lookup": run("DNS lookup", lambda: socket.gethostbyname(host)),

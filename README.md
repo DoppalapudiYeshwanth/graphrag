@@ -22,7 +22,7 @@ through a free tunnel; see [DEPLOYMENT.md](DEPLOYMENT.md) for every hosting rout
 - **Private uploads**: `.txt`, `.md` and `.pdf` files go into a per-visitor workspace; one visitor cannot see
   another's documents.
 - **Two front ends**, same engine: a Streamlit app and a FastAPI service with a plain-JavaScript page.
-- **Tested**: 185 tests, 92% coverage, CI on every push.
+- **Tested**: 190 tests, 92% coverage, CI on every push.
 
 ## How it works
 

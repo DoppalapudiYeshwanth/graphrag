@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from types import SimpleNamespace
 
 import httpx
+import pytest
 from groq import APIConnectionError, AuthenticationError
 
 from graphrag.config import get_settings
@@ -54,3 +56,34 @@ def test_all_models_available_passes(settings_env) -> None:
 def test_python_check_reports_a_version() -> None:
     ok, detail = check_python()
     assert ok and "Python 3." in detail
+
+
+# ── the deployment probe refuses to test the wrong target ────────────────────
+PROBE = str(Path(__file__).resolve().parent.parent / "deploy" / "streamlit_probe.py")
+
+
+def _probe(uri: str):
+    from streamlit.testing.v1 import AppTest
+
+    app = AppTest.from_file(PROBE, default_timeout=30)
+    app.secrets["NEO4J_URI"] = uri
+    app.secrets["NEO4J_USERNAME"] = "neo4j"
+    app.secrets["NEO4J_PASSWORD"] = "placeholder"
+    return app.run()
+
+
+@pytest.mark.parametrize(
+    "uri",
+    ["bolt://localhost:7687", "neo4j://127.0.0.1:7687", "bolt://192.168.1.20:7687", "bolt://[::1]:7687"],
+)
+def test_probe_stops_with_a_clear_message_for_local_addresses(uri: str) -> None:
+    app = _probe(uri)
+    assert any("your own computer" in e.value for e in app.error)
+    assert len(app.success) == 0  # it must not run network checks against a wrong target
+
+
+def test_probe_missing_secrets_are_named() -> None:
+    from streamlit.testing.v1 import AppTest
+
+    app = AppTest.from_file(PROBE, default_timeout=30).run()
+    assert any("Missing secrets" in e.value and "NEO4J_URI" in e.value for e in app.error)

@@ -10,7 +10,7 @@ browser --cookie--> Cloud Run (FastAPI: web page + /api/*  +  /ask) --bolt+s--> 
                               +--HTTPS--> Groq (extraction + answers)
 ```
 
-> **Status of this guide.** The app, both front ends, the 185 tests and the local tunnel are verified. The
+> **Status of this guide.** The app, both front ends, the 190 tests and the local tunnel are verified. The
 > hosted routes (Streamlit Cloud, Render, Cloud Run) were NOT executed by the author, because they need your
 > accounts. Free-tier rules change, so check each provider's current terms before relying on them.
 
@@ -89,7 +89,8 @@ NEO4J_PASSWORD = "<password from the credentials file>"
 | --- | --- |
 | All green | Route B works. Continue to step 2. |
 | Port 443 green, **7687 red** | Streamlit blocks Bolt. Route B is dead; use Route A, or Aura's HTTP query API with a code change. |
-| Embedding model red or killed | Out of memory or install problem; Streamlit's documented range is 690 MB to 2.7 GB (February 2024 figures). |
+| The page says the secrets "point at your own computer" (or `Target host: localhost`) | `NEO4J_URI` is still your local database address. Put the Aura `neo4j+s://<id>.databases.neo4j.io` address in Secrets and reboot the app. Nothing else on the page is meaningful until this is fixed. |
+| Embedding model red or killed | Out of memory or install problem; Streamlit's documented range is 690 MB to 2.7 GB (February 2024 figures); a real probe on Streamlit's host measured 668 MB peak with the model loaded. |
 
 ### Step 2: load the demo graph into Aura (free: reuses the extraction cache, no LLM tokens)
 
