@@ -73,7 +73,9 @@ class Settings(BaseSettings):
         "co_mention",
         description="graph_hop: chunks of neighbouring entities; co_mention: chunks sharing entities.",
     )
-    answer_max_tokens: int = Field(1024, gt=0)
+    answer_max_tokens: int = Field(
+        800, gt=0, description="Max answer tokens. Some free models cap output at 1,000 tokens per minute."
+    )
 
     # Web uploads (private per-visitor workspaces)
     max_upload_bytes: int = Field(2_000_000, gt=0)

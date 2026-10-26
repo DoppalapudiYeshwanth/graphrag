@@ -201,6 +201,13 @@ def _is_daily_limit(exc: BaseException) -> bool:
     return "(TPD)" in text or "per day" in text
 
 
+def llm_extra_params(model: str) -> dict[str, str]:
+    """Per-model request options. gpt-oss models are reasoning models; low effort saves most tokens."""
+    if model.startswith("openai/gpt-oss"):
+        return {"reasoning_effort": "low"}
+    return {}
+
+
 def _is_model_unavailable(exc: BaseException) -> bool:
     """True when the model is retired or this key cannot access it."""
     text = str(exc)
@@ -247,10 +254,7 @@ class GraphExtractor:
 
     @staticmethod
     def _extra_params(model: str) -> dict[str, str]:
-        """gpt-oss models are reasoning models; low effort saves most of the tokens."""
-        if model.startswith("openai/gpt-oss"):
-            return {"reasoning_effort": "low"}
-        return {}
+        return llm_extra_params(model)
 
     def _call(self, model: str, chunk: Chunk) -> ExtractionResult:
         s = self._settings

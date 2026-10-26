@@ -22,7 +22,7 @@ through a free tunnel; see [DEPLOYMENT.md](DEPLOYMENT.md) for every hosting rout
 - **Private uploads**: `.txt`, `.md` and `.pdf` files go into a per-visitor workspace; one visitor cannot see
   another's documents.
 - **Two front ends**, same engine: a Streamlit app and a FastAPI service with a plain-JavaScript page.
-- **Tested**: 190 tests, 92% coverage, CI on every push.
+- **Tested**: 204 tests, 94% coverage, CI on every push.
 
 ## How it works
 
@@ -158,7 +158,7 @@ full suite on Python 3.10 and 3.12 against a Neo4j service container, plus an ad
 ## Limitations
 
 The graph's benefit is unproven on single-document questions; the multi-hop benchmark is small; entities are matched
-by exact normalised name; answering has no model fallback chain; free hosts sleep or restrict ports.
+by exact normalised name; free hosts sleep or restrict ports.
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) lists them with their reasons.
 
 ## Contributing and license

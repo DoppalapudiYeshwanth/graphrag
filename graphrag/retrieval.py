@@ -6,11 +6,21 @@ import logging
 import re
 from typing import Any
 
-from groq import Groq
+from groq import (
+    APIConnectionError,
+    AuthenticationError,
+    BadRequestError,
+    Groq,
+    InternalServerError,
+    NotFoundError,
+    PermissionDeniedError,
+    RateLimitError,
+)
 from pydantic import BaseModel, Field
 
 from graphrag.config import get_settings
 from graphrag.graph import PUBLIC, GraphStore
+from graphrag.models import llm_extra_params
 
 logger = logging.getLogger(__name__)
 
@@ -170,6 +180,23 @@ def build_context_text(ctx: RetrievalContext) -> str:
     return f"PASSAGES:\n{passages}\n\nGRAPH FACTS:\n{facts}"
 
 
+_OUTPUT_CAP = re.compile(r"output tokens per minute.*?Limit (\d+)", re.S | re.I)
+
+
+def _output_cap_from(exc: Exception) -> int | None:
+    """If Groq refused the request because max_tokens exceeds the model's per-minute output cap,
+    return a smaller max_tokens that fits (90% of the stated limit); otherwise None."""
+    match = _OUTPUT_CAP.search(str(exc))
+    return int(int(match.group(1)) * 0.9) if match else None
+
+
+def _is_unavailable(exc: Exception) -> bool:
+    text = str(exc)
+    return isinstance(exc, NotFoundError) or (
+        isinstance(exc, BadRequestError) and ("decommissioned" in text or "model_not_found" in text)
+    )
+
+
 class GraphRAG:
     """End-to-end question answering."""
 
@@ -178,24 +205,62 @@ class GraphRAG:
         self._s = s
         self._retriever = GraphRetriever(store)
         self._llm = Groq(api_key=s.groq_api_key.get_secret_value())
+        self._token_caps: dict[str, int] = {}  # learned max_tokens per model
+
+    def _complete(self, messages: list[dict[str, str]]) -> str:
+        """Generate the answer, surviving per-model limits.
+
+        Models are tried in order: ANSWER_MODEL first, then the extraction chain. For each model:
+        a refusal that names its output-token cap is retried once with a smaller max_tokens (and the
+        cap is remembered); any other rate limit, a retired model or a server fault moves on to the
+        next model. A rejected API key is raised immediately, because no other model will accept it.
+        """
+        s = self._s
+        models = list(dict.fromkeys([s.answer_model or s.groq_model, *s.model_chain]))
+        last: Exception | None = None
+        for model in models:
+            cap = self._token_caps.get(model, s.answer_max_tokens)
+            for attempt in range(2):
+                try:
+                    resp = self._llm.chat.completions.create(
+                        model=model,
+                        temperature=s.llm_temperature,
+                        max_tokens=cap,
+                        messages=messages,
+                        **llm_extra_params(model),
+                    )
+                except (AuthenticationError, PermissionDeniedError):
+                    raise
+                except RateLimitError as exc:
+                    smaller = _output_cap_from(exc)
+                    if attempt == 0 and smaller and smaller < cap:
+                        logger.warning("%s caps output at about %d tokens; retrying smaller", model, smaller)
+                        cap = self._token_caps[model] = smaller
+                        continue
+                    logger.warning("Answer model %s is rate limited; trying the next model", model)
+                    last = exc
+                    break
+                except (BadRequestError, NotFoundError, InternalServerError, APIConnectionError) as exc:
+                    if isinstance(exc, BadRequestError) and not _is_unavailable(exc):
+                        raise
+                    logger.warning(
+                        "Answer model %s unavailable (%s); trying the next model", model, type(exc).__name__
+                    )
+                    last = exc
+                    break
+                else:
+                    raw = resp.choices[0].message.content or ""
+                    return re.sub(r"<think>.*?</think>", "", raw, flags=re.S).strip()
+        raise last or RuntimeError("No answer model is configured")
 
     def ask(self, question: str, scopes: list[str] | None = None) -> Answer:
         ctx = self._retriever.retrieve(question, scopes)
         if not ctx.chunks:
             return Answer(question=question, answer="No relevant context found.", context=ctx)
 
-        resp = self._llm.chat.completions.create(
-            model=self._s.answer_model or self._s.groq_model,
-            temperature=self._s.llm_temperature,
-            max_tokens=self._s.answer_max_tokens,
-            messages=[
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {
-                    "role": "user",
-                    "content": f"{build_context_text(ctx)}\n\nQUESTION: {question}",
-                },
-            ],
-        )
-        text = re.sub(r"<think>.*?</think>", "", resp.choices[0].message.content or "", flags=re.S)
-        text = text.strip()
+        messages = [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": f"{build_context_text(ctx)}\n\nQUESTION: {question}"},
+        ]
+        text = self._complete(messages)
         return Answer(question=question, answer=text, context=ctx)

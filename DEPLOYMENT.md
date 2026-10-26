@@ -10,7 +10,7 @@ browser --cookie--> Cloud Run (FastAPI: web page + /api/*  +  /ask) --bolt+s--> 
                               +--HTTPS--> Groq (extraction + answers)
 ```
 
-> **Status of this guide.** The app, both front ends, the 190 tests and the local tunnel are verified. The
+> **Status of this guide.** The app, both front ends, the 204 tests and the local tunnel are verified. The
 > hosted routes (Streamlit Cloud, Render, Cloud Run) were NOT executed by the author, because they need your
 > accounts. Free-tier rules change, so check each provider's current terms before relying on them.
 
@@ -281,7 +281,7 @@ Set a billing budget alert in the Cloud console before sharing the URL.
   with real traffic and tune `DAILY_CHUNK_BUDGET` and `DAILY_ASK_BUDGET`. A paid Groq tier removes this.
 - **A typical upload** (a few thousand characters) is 3 to 8 chunks; the 15,000-character maximum is
   about 20.
-- **Answering has no fallback chain yet**; extraction does.
+- **Answering falls back across models** (`ANSWER_MODEL`, then the extraction chain) and learns a model's output-token cap from the error when Groq refuses a request as too large. A rejected API key is reported immediately instead of being retried.
 - **Aura free instances may pause when idle**; if `/health` returns 503, resume the instance.
 
 ## 10. Troubleshooting

@@ -90,7 +90,7 @@ error as feedback. **JSON mode** is used instead of tool calling because Groq va
 a missing field produced an HTTP 400 before any retry could happen. In JSON mode validation is local, so recovery works.
 
 The chain is `gpt-oss-20b`, `gpt-oss-120b`, `qwen3.8-27b`, `gpt-oss-safeguard-20b` (`GROQ_MODEL` then
-`GROQ_FALLBACK_MODELS`). Answers use a separate model (`ANSWER_MODEL`) so they draw on a different quota.
+`GROQ_FALLBACK_MODELS`). Answers start on a separate model (`ANSWER_MODEL`) so they draw on a different quota, and fall back through the same chain.
 
 | Event | Response |
 | --- | --- |
@@ -145,7 +145,7 @@ per model. Whether Groq's windows are strictly rolling was not verified; the des
 
 - The graph's value is unproven on single-document questions; the multi-hop benchmark is small and biased.
 - Entity linking is exact-match on a normalised name ("LLM" and "Large Language Model" stay separate).
-- Answering has no model fallback chain.
+- Groq's per-model output caps vary and are not published for the free tier. Answering therefore adapts: a refusal that names a cap is retried once with a smaller `max_tokens` (remembered per model), other limits fall through `ANSWER_MODEL` then the extraction chain, and a rejected key fails immediately.
 - No authentication: possession of a workspace link is the credential.
 - Uploaded text is processed by a third-party LLM provider.
 - Free tiers can change; verify each provider's current terms before relying on them.
@@ -158,4 +158,4 @@ per model. Whether Groq's windows are strictly rolling was not verified; the des
    when any of those is removed.
 3. *What happens when the LLM quota runs out mid-batch?* Fall through the chain, then stop cleanly; the cache makes
    the rerun free of repeated work.
-4. *What would you build next?* Independent multi-hop evaluation, entity alias merging, an answer-path fallback chain.
+4. *What would you build next?* Independent multi-hop evaluation, entity alias merging.
