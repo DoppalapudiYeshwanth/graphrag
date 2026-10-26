@@ -1,6 +1,6 @@
 # Graph RAG: ask your documents
 
-[![CI](https://github.com/DoppalapudiYeshwanth/projects/actions/workflows/ci.yml/badge.svg)](https://github.com/DoppalapudiYeshwanth/projects/actions/workflows/ci.yml)
+[![CI](https://github.com/DoppalapudiYeshwanth/graphrag/actions/workflows/ci.yml/badge.svg)](https://github.com/DoppalapudiYeshwanth/graphrag/actions/workflows/ci.yml)
 ![Python](https://img.shields.io/badge/python-3.10%20%7C%203.12-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
@@ -76,7 +76,7 @@ entities, so treat it as suggestive. See the architecture document for the cavea
 You need Python, Docker (for Neo4j) and a free [Groq API key](https://console.groq.com/keys).
 
 ```bash
-git clone https://github.com/DoppalapudiYeshwanth/projects.git graphrag && cd graphrag
+git clone https://github.com/DoppalapudiYeshwanth/graphrag.git && cd graphrag
 python3.12 -m venv venv && source venv/bin/activate
 pip install -r requirements-dev.txt          # exact tested versions: requirements.lock
 

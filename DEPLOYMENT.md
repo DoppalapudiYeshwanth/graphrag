@@ -71,7 +71,7 @@ That is the one thing nobody has verified, so test it before building anything o
 
 1. Create an [AuraDB Free](https://neo4j.com/cloud/aura-free/) instance. Download the credentials file when
    prompted; the password is shown once. Note the `neo4j+s://...` URI.
-2. Push this repository to GitHub (a public repository is simplest).
+2. Push this repository to its own GitHub repository (a public repository is simplest). It must be the repository root: Streamlit and GitHub Actions both expect `requirements.txt` and `.github/` at the top level.
 3. In Streamlit Community Cloud, create an app from the repository with **main file `deploy/streamlit_probe.py`**
    and choose Python 3.12 under Advanced settings.
 4. In Advanced settings, Secrets, paste:
