@@ -22,9 +22,9 @@ SYSTEMS = ["vector@5", "vector@7", "graph_hop", "co_mention"]
 def main() -> None:
     s = get_settings()
     rows = [json.loads(line) for line in QUESTIONS_PATH.open(encoding="utf-8")]
-    both = {k: 0 for k in SYSTEMS}
-    any_ = {k: 0 for k in SYSTEMS}
-    recall = {k: 0.0 for k in SYSTEMS}
+    both = dict.fromkeys(SYSTEMS, 0)
+    any_ = dict.fromkeys(SYSTEMS, 0)
+    recall = dict.fromkeys(SYSTEMS, 0.0)
     helped: list[dict] = []
 
     with GraphStore() as store:

@@ -1,1 +1,11 @@
-pytest
+# Everything needed to develop, test and lint (CI installs this file).
+-r requirements.txt
+
+fastapi>=0.144            # the FastAPI app and its tests
+uvicorn>=0.54
+python-multipart>=0.0.32
+httpx>=0.28
+datasets>=5.1             # only scripts/prepare_corpus.py
+pytest>=9.1
+pytest-cov>=7.1
+ruff>=0.17

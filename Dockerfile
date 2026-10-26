@@ -1,6 +1,6 @@
 # Graph RAG API image. CPU-only PyTorch keeps it small; the embedding model is baked in
 # so the container starts without downloading anything.
-FROM python:3.10-slim
+FROM python:3.12-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -8,6 +8,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     HF_HOME=/opt/hf
 
 WORKDIR /app
+
+RUN pip install --upgrade pip
 
 # PyTorch first, in its own layer: it is large and rarely changes, so rebuilds reuse it.
 RUN pip install torch --extra-index-url https://download.pytorch.org/whl/cpu

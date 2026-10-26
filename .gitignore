@@ -4,3 +4,12 @@ __pycache__/
 data/
 *.pyc
 .DS_Store
+# Streamlit local secrets
+.streamlit/secrets.toml
+
+# Test and tooling artefacts
+.coverage
+coverage.xml
+htmlcov/
+.pytest_cache/
+.ruff_cache/

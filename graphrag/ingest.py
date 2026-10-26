@@ -12,8 +12,9 @@ import io
 import logging
 import re
 import uuid
+from collections.abc import Iterator
 from pathlib import PurePosixPath
-from typing import Any, Iterator
+from typing import Any
 
 import pandas as pd
 from pypdf import PdfReader
@@ -90,9 +91,7 @@ def extract_text(filename: str, data: bytes) -> str:
 
 
 def split_into_chunks(text: str, doc_id: str, title: str) -> list[Chunk]:
-    frame = pd.DataFrame(
-        [{"doc_id": doc_id, "text": text, "category": UPLOAD_CATEGORY, "source": title}]
-    )
+    frame = pd.DataFrame([{"doc_id": doc_id, "text": text, "category": UPLOAD_CATEGORY, "source": title}])
     return chunk_documents(frame)
 
 
@@ -111,18 +110,14 @@ def ingest_stream(
     reserved = 0
     try:
         if len(store.list_documents(workspace)) >= s.max_docs_per_workspace:
-            raise IngestError(
-                f"You can keep up to {s.max_docs_per_workspace} documents. Delete one first."
-            )
+            raise IngestError(f"You can keep up to {s.max_docs_per_workspace} documents. Delete one first.")
         title = safe_title(filename)
         text = extract_text(filename, data)
         doc_id = f"UP-{uuid.uuid4().hex[:12]}"
         chunks = split_into_chunks(text, doc_id, title)
 
         if not store.reserve_budget("chunks", len(chunks), s.daily_chunk_budget):
-            raise IngestError(
-                "Today's shared processing capacity is used up. Please try again tomorrow."
-            )
+            raise IngestError("Today's shared processing capacity is used up. Please try again tomorrow.")
         reserved = len(chunks)
         yield {"event": "start", "doc_id": doc_id, "title": title, "chunks": len(chunks)}
 
@@ -131,10 +126,10 @@ def ingest_stream(
         for done, chunk in enumerate(chunks, start=1):
             try:
                 results[chunk.chunk_id] = extractor.extract(chunk)
-            except QuotaExhaustedError:
+            except QuotaExhaustedError as exc:
                 store.release_budget("chunks", reserved - (done - 1))
                 reserved = 0
-                raise IngestError("The language model's quota is used up. Please try again later.")
+                raise IngestError("The language model's quota is used up. Please try again later.") from exc
             except Exception:
                 logger.exception("Extraction failed for %s", chunk.chunk_id)
                 results[chunk.chunk_id] = ExtractionResult()  # still searchable by similarity
@@ -147,10 +142,10 @@ def ingest_stream(
         try:
             store.upsert_chunks(chunks, workspace=workspace, title=title)
             store.upsert_extractions(results, workspace=workspace)
-        except Exception:
+        except Exception as exc:
             logger.exception("Storing %s failed; rolling back", doc_id)
             store.delete_document(workspace, doc_id)
-            raise IngestError("Could not save the document. Please try again.")
+            raise IngestError("Could not save the document. Please try again.") from exc
 
         yield {
             "event": "done",

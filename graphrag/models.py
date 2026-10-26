@@ -73,17 +73,39 @@ ALLOWED_RELATIONS: tuple[str, ...] = (
 # Only same-direction synonyms are mapped; reversed verbs (USED_BY, INCLUDES) fall to RELATED_TO
 # so an edge is never silently flipped.
 _RELATION_SYNONYMS: dict[str, str] = {
-    "UTILIZES": "USES", "EMPLOYS": "USES", "LEVERAGES": "USES", "RELIES_ON": "USES",
-    "DEPENDS_ON": "USES", "REQUIRES": "USES", "USED": "USES", "USE": "USES",
-    "APPLIES_TO": "APPLIED_TO", "USED_FOR": "APPLIED_TO", "USED_IN": "APPLIED_TO",
-    "ENHANCES": "IMPROVES", "OPTIMIZES": "IMPROVES", "REDUCES": "IMPROVES",
-    "BOOSTS": "IMPROVES", "INCREASES": "IMPROVES", "IMPROVE": "IMPROVES",
-    "COMPONENT_OF": "PART_OF", "MEMBER_OF": "PART_OF", "SUBSET_OF": "PART_OF",
-    "TESTED_ON": "EVALUATED_ON", "EVALUATED_WITH": "EVALUATED_ON",
-    "BENCHMARKED_ON": "EVALUATED_ON", "EVALUATED_ON": "EVALUATED_ON",
-    "DERIVED_FROM": "BASED_ON", "BUILT_ON": "BASED_ON", "INSPIRED_BY": "BASED_ON",
-    "BEATS": "OUTPERFORMS", "SURPASSES": "OUTPERFORMS", "OUTPERFORM": "OUTPERFORMS",
-    "BUILDS_ON": "EXTENDS", "GENERALIZES": "EXTENDS", "EXTEND": "EXTENDS",
+    "UTILIZES": "USES",
+    "EMPLOYS": "USES",
+    "LEVERAGES": "USES",
+    "RELIES_ON": "USES",
+    "DEPENDS_ON": "USES",
+    "REQUIRES": "USES",
+    "USED": "USES",
+    "USE": "USES",
+    "APPLIES_TO": "APPLIED_TO",
+    "USED_FOR": "APPLIED_TO",
+    "USED_IN": "APPLIED_TO",
+    "ENHANCES": "IMPROVES",
+    "OPTIMIZES": "IMPROVES",
+    "REDUCES": "IMPROVES",
+    "BOOSTS": "IMPROVES",
+    "INCREASES": "IMPROVES",
+    "IMPROVE": "IMPROVES",
+    "COMPONENT_OF": "PART_OF",
+    "MEMBER_OF": "PART_OF",
+    "SUBSET_OF": "PART_OF",
+    "TESTED_ON": "EVALUATED_ON",
+    "EVALUATED_WITH": "EVALUATED_ON",
+    "BENCHMARKED_ON": "EVALUATED_ON",
+    "EVALUATED_ON": "EVALUATED_ON",
+    "DERIVED_FROM": "BASED_ON",
+    "BUILT_ON": "BASED_ON",
+    "INSPIRED_BY": "BASED_ON",
+    "BEATS": "OUTPERFORMS",
+    "SURPASSES": "OUTPERFORMS",
+    "OUTPERFORM": "OUTPERFORMS",
+    "BUILDS_ON": "EXTENDS",
+    "GENERALIZES": "EXTENDS",
+    "EXTEND": "EXTENDS",
 }
 _RELATION_PREFIXES = ("CAN_BE_", "IS_", "ARE_", "WAS_", "CAN_")
 
@@ -95,7 +117,7 @@ def canonical_relation(raw: str) -> str:
         raise ValueError("relationship type must not be empty")
     for prefix in _RELATION_PREFIXES:
         if v.startswith(prefix) and len(v) > len(prefix):
-            v = v[len(prefix):]
+            v = v[len(prefix) :]
             break
     if v in ALLOWED_RELATIONS:
         return v
@@ -126,7 +148,7 @@ class ExtractionResult(BaseModel):
     relationships: list[Relationship] = Field(default_factory=list)
 
     @model_validator(mode="after")
-    def _prune_invalid(self) -> "ExtractionResult":
+    def _prune_invalid(self) -> ExtractionResult:
         """Dedupe entities, drop dangling/self-referential relationships."""
         seen: dict[str, Entity] = {}
         for e in self.entities:
@@ -261,7 +283,7 @@ class GraphExtractor:
                     continue
                 if not _is_rate_limit(exc):
                     raise
-                wait = 2 ** attempt * 5
+                wait = 2**attempt * 5
                 logger.warning("Rate limited on %s; sleeping %ds", chunk.chunk_id, wait)
                 time.sleep(wait)
                 attempt += 1
@@ -291,24 +313,30 @@ class GraphExtractor:
                 except QuotaExhaustedError as exc:
                     logger.error(
                         "Daily token quota exhausted on every model; stopping. Rerun later "
-                        "to resume (%d chunks done). %s", len(results), exc,
+                        "to resume (%d chunks done). %s",
+                        len(results),
+                        exc,
                     )
                     break
-                except Exception:
+                except Exception as exc:
                     logger.exception("Extraction failed for %s", chunk.chunk_id)
                     failed.append(chunk.chunk_id)
                     if i >= s.min_failure_sample and len(failed) / i > s.max_failure_rate:
                         raise ExtractionAbortedError(
                             f"{len(failed)} of {i} chunks failed "
                             f"(limit {s.max_failure_rate:.0%}); aborting. First: {failed[:5]}"
-                        )
+                        ) from exc
                     continue
                 results[chunk.chunk_id] = res
                 f.write(json.dumps({"chunk_id": chunk.chunk_id, "result": res.model_dump()}) + "\n")
                 f.flush()
                 logger.info(
                     "[%d/%d] %s -> %d entities, %d rels",
-                    i, len(todo), chunk.chunk_id, len(res.entities), len(res.relationships),
+                    i,
+                    len(todo),
+                    chunk.chunk_id,
+                    len(res.entities),
+                    len(res.relationships),
                 )
                 time.sleep(self._settings.extraction_delay_s)
 

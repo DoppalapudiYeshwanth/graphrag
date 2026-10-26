@@ -1,4 +1,4 @@
-# Deploying Graph RAG: Cloud Run + Neo4j AuraDB
+# Deploying Graph RAG
 
 One container serves both the **web app** (upload documents, ask questions) and the **API**. All state
 lives in Neo4j, so the deployment is two pieces: a managed Neo4j (AuraDB) holding the demo corpus and
@@ -10,18 +10,19 @@ browser --cookie--> Cloud Run (FastAPI: web page + /api/*  +  /ask) --bolt+s--> 
                               +--HTTPS--> Groq (extraction + answers)
 ```
 
-> **Status of this guide.** The web app, API, tests (152) and Docker image are verified locally. The
-> AuraDB and Cloud Run steps were NOT executed by the author; they use standard `gcloud` and Aura
-> flows. Free-tier limits and console wording change, so check each against current provider docs.
+> **Status of this guide.** The app, both front ends, the 185 tests and the local tunnel are verified. The
+> hosted routes (Streamlit Cloud, Render, Cloud Run) were NOT executed by the author, because they need your
+> accounts. Free-tier rules change, so check each provider's current terms before relying on them.
 
 ## Choose a route (read first)
 
 | Route | Card on file? | Can it bill you? | Always on? | Status |
 | --- | --- | --- | --- | --- |
-| **A. Your machine + free Cloudflare tunnel** (below) | No | No | Only while your Mac runs the script | **Built and tested end to end** |
-| B. Render free web service | Unverified (the docs do not say) | Docs say overage charges are possible when a payment method exists | Sleeps after 15 idle minutes | Not built; likely needs a slimmer app (about 512 MB RAM, unverified) |
-| C. Google Cloud Run + AuraDB (sections 0 to 11) | Yes (an open billing account) | Yes: Google has no hard cap, only alerts | Yes, scales to zero | Guide written, not run (your billing accounts are closed) |
-| D. Hugging Face Docker Space | Needs a paid plan | n/a | n/a | **Not viable**: Docker Spaces require a paid plan, and free Spaces only reach ports 80, 443 and 8080, so Aura (port 7687) is blocked |
+| **A. Your machine + free Cloudflare tunnel** | No | No | Only while your Mac runs the script | **Built and tested end to end** |
+| **B. Streamlit Community Cloud + Aura Free** | Aura: no (per its FAQ). Streamlit: needs only a GitHub account | No payment method involved | Sleeps after 12 idle hours; Aura pauses after 3 idle days | **Code and probe built.** Run the probe first: whether Streamlit's servers can reach port 7687 is unverified |
+| C. Render free web service | Unverified (docs do not say) | Docs say overage charges are possible when a payment method exists | Sleeps after 15 idle minutes | Not built. Free instances have 512 MB RAM; the embedding model alone measured about 434 MB, so it would need a lighter embedder |
+| D. Google Cloud Run + AuraDB (sections 0 to 11) | Yes (an open billing account) | Yes: Google has no hard cap, only alerts | Yes, scales to zero | Guide written, not run (your billing accounts are closed) |
+| E. Hugging Face Docker Space | Needs a paid plan | n/a | n/a | **Not viable**: Docker Spaces require a paid plan, and free Spaces only reach ports 80, 443 and 8080, so Aura (7687) is blocked |
 
 Rule of thumb for "never bill me": if no service in the chain has your payment method, nothing can bill you.
 
@@ -61,7 +62,63 @@ Know the limits:
 
 To share the URL for a limited time: run the script, send the link, and press Ctrl-C when you are done.
 
-The rest of this guide (sections 0 to 11) covers Route C.
+## Route B: Streamlit Community Cloud + Aura Free
+
+Everything here is free and needs no payment method, **if** Streamlit's servers can reach Aura on port 7687.
+That is the one thing nobody has verified, so test it before building anything on it.
+
+### Step 1: probe (10 minutes, decides everything)
+
+1. Create an [AuraDB Free](https://neo4j.com/cloud/aura-free/) instance. Download the credentials file when
+   prompted; the password is shown once. Note the `neo4j+s://...` URI.
+2. Push this repository to GitHub (a public repository is simplest).
+3. In Streamlit Community Cloud, create an app from the repository with **main file `deploy/streamlit_probe.py`**
+   and choose Python 3.12 under Advanced settings.
+4. In Advanced settings, Secrets, paste:
+
+```toml
+NEO4J_URI = "neo4j+s://<id>.databases.neo4j.io"
+NEO4J_USERNAME = "neo4j"
+NEO4J_PASSWORD = "<password from the credentials file>"
+```
+
+5. Open the app. Every line is a real check run from Streamlit's servers: DNS, port 443 (control), **port 7687**,
+   a real Neo4j connection and query, reachability of Groq, and loading the embedding model with its peak memory.
+
+| Probe result | Meaning |
+| --- | --- |
+| All green | Route B works. Continue to step 2. |
+| Port 443 green, **7687 red** | Streamlit blocks Bolt. Route B is dead; use Route A, or Aura's HTTP query API with a code change. |
+| Embedding model red or killed | Out of memory or install problem; Streamlit's documented range is 690 MB to 2.7 GB (February 2024 figures). |
+
+### Step 2: load the demo graph into Aura (free: reuses the extraction cache, no LLM tokens)
+
+```bash
+source venv/bin/activate
+export NEO4J_URI='neo4j+s://<id>.databases.neo4j.io' NEO4J_USERNAME=neo4j NEO4J_PASSWORD='<password>'
+python -m scripts.build_graph
+```
+
+The demo graph is about 5,200 nodes and 8,600 relationships. Aura's documentation lists a 200,000-node limit while its
+free-tier FAQ page lists an older, smaller one; the graph fits under either. Verify the counts in the Aura browser.
+
+### Step 3: deploy the real app
+
+1. In Streamlit Community Cloud, create (or edit) the app with **main file `streamlit_app.py`**, Python 3.12.
+2. Secrets: the same three Neo4j lines plus `GROQ_API_KEY`, `GROQ_MODEL`, `GROQ_FALLBACK_MODELS`, `ANSWER_MODEL` and
+   low public caps. A ready template is `.streamlit/secrets.toml.example`.
+3. Never put these in the repository. `.streamlit/secrets.toml` is git-ignored.
+
+### What to expect
+
+- Streamlit apps sleep after 12 idle hours and wake on the next visit; Aura Free pauses after 3 idle days (resume it in
+  the Aura console; data is kept).
+- Visitors are identified by the `?ws=` value in the page URL, so **anyone holding that link can open that workspace**.
+  The page says so. Per-session rate limits are in memory; the shared daily budgets in Neo4j are the hard cap.
+- `requirements.txt` carries a CPU-only PyTorch index line. If Streamlit's installer rejects it, the install log will
+  say so; fall back to removing that line (the install is then larger).
+
+The rest of this guide (sections 0 to 11) covers Route D, Google Cloud Run.
 
 ## 0. What you are about to make public
 

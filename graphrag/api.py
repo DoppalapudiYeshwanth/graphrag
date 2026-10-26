@@ -16,9 +16,10 @@ import threading
 import time
 import uuid
 from collections import defaultdict, deque
+from collections.abc import Callable, Iterator
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any, Callable, Iterator, Literal
+from typing import Any, Literal
 
 from fastapi import Depends, FastAPI, File, Header, HTTPException, Request, Response, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
@@ -39,10 +40,7 @@ SOURCE_TEXT_LIMIT = 400
 COOKIE = "ws"
 WORKSPACE_RE = re.compile(r"^[a-f0-9]{32}$")
 DOC_ID_RE = re.compile(r"^UP-[a-f0-9]{12}$")
-CSP = (
-    "default-src 'self'; img-src 'self' data:; frame-ancestors 'none'; "
-    "base-uri 'none'; form-action 'self'"
-)
+CSP = "default-src 'self'; img-src 'self' data:; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
 
 
 class AskRequest(BaseModel):
@@ -159,11 +157,11 @@ def create_app(
     def require_api_key(request: Request, x_api_key: str | None = Header(default=None)) -> None:
         """Authenticate (when API_KEY is set) and rate-limit programmatic clients."""
         expected = settings.api_key
-        if expected is not None:
-            if x_api_key is None or not secrets.compare_digest(
-                x_api_key.encode(), expected.get_secret_value().encode()
-            ):
-                raise HTTPException(status_code=401, detail="Missing or invalid X-API-Key")
+        if expected is not None and (
+            x_api_key is None
+            or not secrets.compare_digest(x_api_key.encode(), expected.get_secret_value().encode())
+        ):
+            raise HTTPException(status_code=401, detail="Missing or invalid X-API-Key")
         if not api_limiter.allow(x_api_key or _client_ip(request)):
             raise HTTPException(status_code=429, detail="Too many requests; slow down")
 
@@ -173,8 +171,13 @@ def create_app(
         if ws is None or not WORKSPACE_RE.match(ws):
             ws = uuid.uuid4().hex
             response.set_cookie(
-                COOKIE, ws, max_age=int(settings.workspace_ttl_days * 86400),
-                httponly=True, samesite="lax", secure=_is_https(request), path="/",
+                COOKIE,
+                ws,
+                max_age=int(settings.workspace_ttl_days * 86400),
+                httponly=True,
+                samesite="lax",
+                secure=_is_https(request),
+                path="/",
             )
         return ws
 
@@ -183,7 +186,13 @@ def create_app(
             raise HTTPException(status_code=503, detail="Uploads are not available")
         return request.app.state.store
 
-    def limit(request: Request, ws: str, ws_limiter: SlidingWindowLimiter, ip_limiter: SlidingWindowLimiter, what: str) -> None:
+    def limit(
+        request: Request,
+        ws: str,
+        ws_limiter: SlidingWindowLimiter,
+        ip_limiter: SlidingWindowLimiter,
+        what: str,
+    ) -> None:
         """Limit per visitor and per address, so rotating cookies does not evade the cap."""
         if not (ws_limiter.allow(f"ws:{ws}") and ip_limiter.allow(f"ip:{_client_ip(request)}")):
             raise HTTPException(status_code=429, detail=f"Too many {what}; please slow down")
@@ -204,8 +213,11 @@ def create_app(
             answer=result.answer,
             sources=[
                 SourceOut(
-                    chunk_id=c.chunk_id, doc_id=c.doc_id, text=c.text[:SOURCE_TEXT_LIMIT],
-                    score=c.score, via=c.via,
+                    chunk_id=c.chunk_id,
+                    doc_id=c.doc_id,
+                    text=c.text[:SOURCE_TEXT_LIMIT],
+                    score=c.score,
+                    via=c.via,
                 )
                 for c in result.context.chunks
             ],
@@ -234,7 +246,7 @@ def create_app(
     # ── web app ──────────────────────────────────────────────────────────────
     @app.get("/", response_class=HTMLResponse, include_in_schema=False)
     def index(request: Request, response: Response) -> HTMLResponse:
-        ws = visitor(request, response)  # sets the cookie on `response`
+        visitor(request, response)  # called for its side effect: sets the cookie on `response`
         page = HTMLResponse((STATIC_DIR / "index.html").read_text(encoding="utf-8"))
         page.headers["Cache-Control"] = "no-store"
         for header, value in response.headers.items():
@@ -297,7 +309,9 @@ def create_app(
         return {"deleted": True}
 
     @app.post("/api/ask", response_model=AskResponse)
-    def web_ask(body: WebAskRequest, request: Request, response: Response, ws: str = Depends(visitor)) -> AskResponse:
+    def web_ask(
+        body: WebAskRequest, request: Request, response: Response, ws: str = Depends(visitor)
+    ) -> AskResponse:
         st = need_store(request)
         question = body.question.strip()
         if len(question) > settings.max_question_chars:

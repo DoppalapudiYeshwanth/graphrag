@@ -6,10 +6,7 @@ TEST_NEO4J_URI, and refuse to touch a database that holds non-test data.
 
 from __future__ import annotations
 
-import os
-
 import pytest
-from neo4j import GraphDatabase
 
 from graphrag.config import get_settings
 from graphrag.data import Chunk
@@ -17,20 +14,17 @@ from graphrag.graph import GraphStore
 from graphrag.models import Entity, ExtractionResult, Relationship
 from graphrag.retrieval import GraphRetriever
 
-from .conftest import FakeEmbedder
-
 pytestmark = pytest.mark.integration
-
-TEST_ENV = {
-    "TOP_K": "1",  # one vector seed, so graph expansion has room to add chunks
-    "EXPANSION_CHUNKS": "1",
-}
 
 
 def _chunk(doc: str, idx: int, text: str) -> Chunk:
     return Chunk(
-        chunk_id=f"{doc}::{idx}", doc_id=doc, chunk_index=idx, text=text,
-        category="Security", source="arXiv",
+        chunk_id=f"{doc}::{idx}",
+        doc_id=doc,
+        chunk_index=idx,
+        text=text,
+        category="Security",
+        source="arXiv",
     )
 
 
@@ -45,8 +39,11 @@ def _extractions() -> dict[str, ExtractionResult]:
     smart = Entity(name="Smart card", type="Technology", description="tamper-resistant token")
     return {
         "DOC-A::0": ExtractionResult(
-            entities=[Entity(name="Scheme one", type="Algorithm"), smart,
-                      Entity(name="Biometrics", type="Concept")],
+            entities=[
+                Entity(name="Scheme one", type="Algorithm"),
+                smart,
+                Entity(name="Biometrics", type="Concept"),
+            ],
             relationships=[
                 Relationship(source="Scheme one", target="Smart card", type="uses", description="a"),
                 Relationship(source="Scheme one", target="Biometrics", type="based on"),
@@ -58,55 +55,6 @@ def _extractions() -> dict[str, ExtractionResult]:
         ),
         "DOC-C::0": ExtractionResult(entities=[Entity(name="Channel allocation", type="Task")]),
     }
-
-
-@pytest.fixture(scope="module")
-def target():
-    uri = os.environ.get("TEST_NEO4J_URI")
-    if not uri:
-        pytest.skip("TEST_NEO4J_URI not set (use a throwaway Neo4j, never your real graph)")
-    return {
-        "NEO4J_URI": uri,
-        "NEO4J_USERNAME": os.environ.get("TEST_NEO4J_USERNAME", "neo4j"),
-        "NEO4J_PASSWORD": os.environ.get("TEST_NEO4J_PASSWORD", "testpassword"),
-        "NEO4J_DATABASE": os.environ.get("TEST_NEO4J_DATABASE", "neo4j"),
-    }
-
-
-@pytest.fixture
-def store(target, monkeypatch):
-    """A clean GraphStore on the throwaway database, with settings pointed at it."""
-    for key, value in {**target, **TEST_ENV}.items():
-        monkeypatch.setenv(key, value)
-    get_settings.cache_clear()
-
-    driver = GraphDatabase.driver(
-        target["NEO4J_URI"], auth=(target["NEO4J_USERNAME"], target["NEO4J_PASSWORD"])
-    )
-    try:
-        with driver.session(database=target["NEO4J_DATABASE"]) as s:
-            foreign = s.run("MATCH (n) WHERE NOT n:Document AND NOT n:Chunk AND NOT n:Entity "
-                            "AND NOT n:TestMarker RETURN count(n) AS n").single()["n"]
-            total = s.run("MATCH (n) RETURN count(n) AS n").single()["n"]
-            marked = s.run("MATCH (m:TestMarker) RETURN count(m) AS n").single()["n"]
-            if foreign or (total and not marked):
-                pytest.fail(
-                    "Refusing to run: the target database holds data that is not from this test "
-                    "suite. Point TEST_NEO4J_URI at a throwaway instance."
-                )
-    finally:
-        driver.close()
-
-    gs = GraphStore(embedder=FakeEmbedder())
-    gs.__enter__()
-    gs.clear()
-    with gs._driver.session(database=target["NEO4J_DATABASE"]) as s:
-        s.run("CREATE (:TestMarker)").consume()
-    gs.setup_schema()
-    yield gs
-    gs.clear()
-    gs.close()
-    get_settings.cache_clear()
 
 
 def _count(store: GraphStore, cypher: str) -> int:
@@ -142,9 +90,9 @@ def test_shared_entity_merges_across_documents(store: GraphStore) -> None:
     store.upsert_chunks(CHUNKS)
     store.upsert_extractions(_extractions())
     assert _count(store, "MATCH (e:Entity {key: 'smart card'}) RETURN count(e) AS n") == 1
-    assert _count(
-        store, "MATCH (:Chunk)-[:MENTIONS]->(:Entity {key: 'smart card'}) RETURN count(*) AS n"
-    ) == 2
+    assert (
+        _count(store, "MATCH (:Chunk)-[:MENTIONS]->(:Entity {key: 'smart card'}) RETURN count(*) AS n") == 2
+    )
 
 
 def test_edge_keeps_unique_source_chunks(store: GraphStore) -> None:

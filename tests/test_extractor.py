@@ -29,8 +29,12 @@ def tpm() -> RateLimitError:
 
 def make_chunk(i: int = 0) -> Chunk:
     return Chunk(
-        chunk_id=f"DOC-{i}::0", doc_id=f"DOC-{i}", chunk_index=0,
-        text="text", category="cat", source="src",
+        chunk_id=f"DOC-{i}::0",
+        doc_id=f"DOC-{i}",
+        chunk_index=0,
+        text="text",
+        category="cat",
+        source="src",
     )
 
 

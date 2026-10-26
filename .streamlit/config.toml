@@ -1,0 +1,12 @@
+# Streamlit settings. Some of these may be overridden by Streamlit Community Cloud.
+[server]
+maxUploadSize = 2            # MB; matches MAX_UPLOAD_BYTES so large files are refused early
+enableXsrfProtection = true
+enableCORS = true
+
+[browser]
+gatherUsageStats = false
+
+[client]
+toolbarMode = "minimal"
+showErrorDetails = false     # never show Python stack traces to visitors

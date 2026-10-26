@@ -75,9 +75,7 @@ class GraphRetriever:
         scopes = scopes or [PUBLIC]
         hits = self._store.vector_search(question, s.top_k, scopes=scopes)
         chunks = [
-            RetrievedChunk(
-                chunk_id=h["chunk_id"], doc_id=h["doc_id"], text=h["text"], score=h["score"]
-            )
+            RetrievedChunk(chunk_id=h["chunk_id"], doc_id=h["doc_id"], text=h["text"], score=h["score"])
             for h in hits
         ]
         ids = [c.chunk_id for c in chunks]
@@ -86,9 +84,7 @@ class GraphRetriever:
 
         facts = self._graph_facts(ids)
         if s.expansion_chunks:
-            expand = (
-                self._co_mention_chunks if self._mode == "co_mention" else self._expansion_chunks
-            )
+            expand = self._co_mention_chunks if self._mode == "co_mention" else self._expansion_chunks
             chunks.extend(expand(ids, scopes))
         return RetrievalContext(chunks=chunks, facts=facts)
 

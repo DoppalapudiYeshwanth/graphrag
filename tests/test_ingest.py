@@ -27,12 +27,16 @@ def test_safe_title(raw: str, expected: str) -> None:
 
 # ── extract_text ─────────────────────────────────────────────────────────────
 def test_reads_plain_text_and_normalises_whitespace() -> None:
-    text = extract_text("a.txt", b"Hello   world.\r\n\r\n\r\n\r\nSecond paragraph that is long enough to pass.")
+    text = extract_text(
+        "a.txt", b"Hello   world.\r\n\r\n\r\n\r\nSecond paragraph that is long enough to pass."
+    )
     assert text.startswith("Hello world.") and "\n\n\n" not in text and "\r" not in text
 
 
 def test_reads_markdown() -> None:
-    assert "Heading" in extract_text("a.md", b"# Heading\n\nSome body text that is certainly long enough to keep.")
+    assert "Heading" in extract_text(
+        "a.md", b"# Heading\n\nSome body text that is certainly long enough to keep."
+    )
 
 
 def test_reads_a_pdf() -> None:

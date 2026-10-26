@@ -50,10 +50,7 @@ def main(n: int) -> None:
             )
             raw = resp.choices[0].message.content or ""
             q = re.sub(r"<think>.*?</think>", "", raw, flags=re.S).strip()
-            f.write(
-                json.dumps({"question": q, "gold_doc_id": row.doc_id, "category": row.category})
-                + "\n"
-            )
+            f.write(json.dumps({"question": q, "gold_doc_id": row.doc_id, "category": row.category}) + "\n")
             f.flush()
             logger.info("%s -> %s", row.doc_id, q)
             time.sleep(s.extraction_delay_s)

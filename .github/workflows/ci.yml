@@ -3,13 +3,53 @@ name: CI
 on:
   push:
   pull_request:
+  workflow_dispatch:
+
+# Least privilege: the workflow only needs to read the repository.
+permissions:
+  contents: read
+
+# A newer push to the same branch cancels the older, now pointless, run.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHON_VERSION: "3.12"   # recommended version; lint and the dependency audit run on it
 
 jobs:
-  tests:
+  lint:
+    name: Lint and syntax
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+      - name: Install the linter
+        run: pip install "ruff>=0.17"
+      - name: Python syntax check (byte-compile every source file)
+        run: python -m compileall -q graphrag scripts tests deploy streamlit_app.py
+      - name: Lint (errors, import order, likely bugs, security smells)
+        run: ruff check .
+      - name: Formatting
+        run: ruff format --check .
+
+  test:
+    name: Tests (Python ${{ matrix.python }}, Neo4j service)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    needs: lint
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.10", "3.12"]   # 3.10 is the minimum supported; 3.12 is recommended
 
     # A throwaway Neo4j for the integration tests. It is destroyed after the job.
+    # The suite refuses to wipe any database that holds data it did not create.
     services:
       neo4j:
         image: neo4j:5
@@ -25,20 +65,49 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.10"
+          python-version: ${{ matrix.python }}
           cache: pip
-
-      - name: Install dependencies (CPU-only PyTorch keeps the install small)
-        run: |
-          python -m pip install --upgrade pip
-          pip install torch --extra-index-url https://download.pytorch.org/whl/cpu
-          pip install -r requirements.txt -r requirements-dev.txt
-
-      - name: Unit and integration tests
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+      - name: Dependency consistency (pip check)
+        run: pip check
+      - name: Import smoke test (every entry point must import cleanly)
+        env:
+          GROQ_API_KEY: ci-placeholder
+          NEO4J_PASSWORD: ci-placeholder
+        run: python -c "import graphrag.api, graphrag.streamlit_ui, graphrag.ingest, graphrag.retrieval; print('imports ok')"
+      - name: Schema and settings tests (fast gate)
+        run: python -m pytest tests/test_models.py tests/test_data_config.py -q
+      - name: Full suite with coverage
         env:
           TEST_NEO4J_URI: bolt://localhost:7687
           TEST_NEO4J_PASSWORD: testpassword
-        run: python -m pytest -v
+        run: python -m pytest -v --cov --cov-report=term-missing --cov-report=xml --cov-fail-under=85
+      - name: Keep the coverage report
+        if: always() && matrix.python == '3.12'
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-xml
+          path: coverage.xml
+          if-no-files-found: ignore
+          retention-days: 14
+
+  dependency-audit:
+    name: Dependency vulnerability audit (advisory)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # Reports known vulnerabilities in dependencies. Advisory only: a new CVE in a library you do not
+    # control should not block unrelated work, but you should read the output.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - run: pip install pip-audit
+      - run: pip-audit -r requirements.lock --no-deps

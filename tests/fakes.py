@@ -96,7 +96,7 @@ class FakeRag:
 
 def long_text(n_sentences: int = 40) -> bytes:
     """Plain text long enough for several chunks."""
-    return (b"Neural networks learn useful representations from data. " * n_sentences)
+    return b"Neural networks learn useful representations from data. " * n_sentences
 
 
 def minimal_pdf(text: str) -> bytes:

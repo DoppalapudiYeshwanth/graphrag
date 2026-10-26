@@ -11,8 +11,6 @@ from graphrag.graph import PUBLIC, GraphStore
 from graphrag.models import Entity, ExtractionResult, Relationship
 from graphrag.retrieval import GraphRetriever
 
-from .test_graph_integration import store, target  # noqa: F401  (shared fixtures)
-
 pytestmark = pytest.mark.integration
 
 WS_A = "a" * 32
@@ -20,7 +18,9 @@ WS_B = "b" * 32
 
 
 def chunk(doc: str, text: str, ws_title: str = "doc.txt") -> Chunk:
-    return Chunk(chunk_id=f"{doc}::0", doc_id=doc, chunk_index=0, text=text, category="Uploaded", source=ws_title)
+    return Chunk(
+        chunk_id=f"{doc}::0", doc_id=doc, chunk_index=0, text=text, category="Uploaded", source=ws_title
+    )
 
 
 def extraction(*names: str, rel: tuple[str, str] | None = None) -> ExtractionResult:
@@ -53,7 +53,9 @@ def test_private_chunks_are_invisible_to_other_workspaces_and_to_public_search(s
 
 def test_public_and_private_results_are_merged_by_score(store) -> None:
     pub = put(store, None, "PUB-1", "Public text about graph databases and indexing.", "Graph databases")
-    mine = put(store, WS_A, "UP-a", "My private text about graph databases and indexing today.", "Graph databases")
+    mine = put(
+        store, WS_A, "UP-a", "My private text about graph databases and indexing today.", "Graph databases"
+    )
     hits = store.vector_search(mine.text, 5, scopes=[PUBLIC, WS_A])
     assert [h["chunk_id"] for h in hits][0] == "UP-a::0"  # exact match ranks first
     assert {h["chunk_id"] for h in hits} == {pub.chunk_id, mine.chunk_id}
@@ -113,8 +115,15 @@ def test_scope_filter_holds_even_if_data_links_across_workspaces(store, monkeypa
     from graphrag.config import get_settings
 
     get_settings.cache_clear()
-    a = put(store, WS_A, "UP-a", "Alice document about a scheme using a token.", "Scheme", "Token",
-            rel=("Scheme", "Token"))
+    a = put(
+        store,
+        WS_A,
+        "UP-a",
+        "Alice document about a scheme using a token.",
+        "Scheme",
+        "Token",
+        rel=("Scheme", "Token"),
+    )
     put(store, WS_B, "UP-b", "Bob unrelated document about weather patterns.", "Weather")
     with store._driver.session(database=store._s.neo4j_database) as s:  # simulate corrupt data
         s.run(
@@ -129,7 +138,9 @@ def test_scope_filter_holds_even_if_data_links_across_workspaces(store, monkeypa
 
 
 def test_graph_facts_do_not_leak_another_workspaces_relationships(store) -> None:
-    a = put(store, WS_A, "UP-a", "Alice: the Scheme uses a Token.", "Scheme", "Token", rel=("Scheme", "Token"))
+    a = put(
+        store, WS_A, "UP-a", "Alice: the Scheme uses a Token.", "Scheme", "Token", rel=("Scheme", "Token")
+    )
     put(store, WS_B, "UP-b", "Bob: the Scheme uses a Secret.", "Scheme", "Secret", rel=("Scheme", "Secret"))
     ctx = GraphRetriever(store).retrieve(a.text, scopes=[WS_A])
     assert {(f.source, f.target) for f in ctx.facts} == {("Scheme", "Token")}
@@ -198,7 +209,7 @@ def test_budget_never_goes_negative_and_kinds_are_independent(store) -> None:
     assert store.budget_remaining("asks", 5) == 5
 
 
-def test_budget_survives_a_new_store_instance(store, target) -> None:  # noqa: F811
+def test_budget_survives_a_new_store_instance(store) -> None:
     store.reserve_budget("chunks", 7, 10)
     other = GraphStore(embedder=store._embedder)
     try:

@@ -5,9 +5,10 @@ from __future__ import annotations
 import logging
 import re
 from collections import defaultdict
+from collections.abc import Iterator, Sequence
 from datetime import datetime, timezone
 from types import TracebackType
-from typing import Any, Iterator, Sequence
+from typing import Any
 
 from neo4j import Driver, GraphDatabase, ManagedTransaction
 from sentence_transformers import SentenceTransformer
@@ -65,7 +66,7 @@ class GraphStore:
         self._embedder = embedder or Embedder()
 
     # ── lifecycle ────────────────────────────────────────────────────────────
-    def __enter__(self) -> "GraphStore":
+    def __enter__(self) -> GraphStore:
         self._driver.verify_connectivity()
         return self
 
@@ -132,7 +133,7 @@ class GraphStore:
             vectors = self._embedder.embed([c.text for c in batch])
             rows = [
                 {**c.model_dump(), "embedding": v, "workspace": workspace, "title": title}
-                for c, v in zip(batch, vectors)
+                for c, v in zip(batch, vectors, strict=True)
             ]
             self._write(self._tx_upsert_chunks, rows)
         logger.info("Upserted %d chunks", len(chunks))
@@ -222,7 +223,10 @@ class GraphStore:
                            node.category AS category, node.text AS text, score
                     ORDER BY score DESC LIMIT $k
                     """,
-                    index=self._s.vector_index_name, raw_k=min(k * 10, 500), k=k, qvec=qvec,
+                    index=self._s.vector_index_name,
+                    raw_k=min(k * 10, 500),
+                    k=k,
+                    qvec=qvec,
                 ).data()
             for ws in (s for s in scopes if s != PUBLIC):
                 hits += session.run(
@@ -233,7 +237,9 @@ class GraphStore:
                            c.category AS category, c.text AS text, score
                     ORDER BY score DESC LIMIT $k
                     """,
-                    ws=ws, qvec=qvec, k=k,
+                    ws=ws,
+                    qvec=qvec,
+                    k=k,
                 ).data()
         hits.sort(key=lambda h: h["score"], reverse=True)
         return hits[:k]
@@ -245,9 +251,7 @@ class GraphStore:
             "chunks": "MATCH (:Chunk) RETURN count(*) AS n",
             "entities": "MATCH (:Entity) RETURN count(*) AS n",
             "mentions": "MATCH ()-[:MENTIONS]->() RETURN count(*) AS n",
-            "entity_relationships": (
-                "MATCH (:Entity)-[r]->(:Entity) RETURN count(r) AS n"
-            ),
+            "entity_relationships": ("MATCH (:Entity)-[r]->(:Entity) RETURN count(r) AS n"),
         }
         with self._driver.session(database=self._s.neo4j_database) as session:
             return {k: session.run(q).single()["n"] for k, q in queries.items()}
@@ -280,7 +284,8 @@ class GraphStore:
         with self._driver.session(database=self._s.neo4j_database) as session:
             found = session.run(
                 "MATCH (d:Document {doc_id: $id, workspace: $ws}) RETURN count(d) AS n",
-                id=doc_id, ws=workspace,
+                id=doc_id,
+                ws=workspace,
             ).single()["n"]
             if not found:
                 return False
@@ -290,7 +295,8 @@ class GraphStore:
                 OPTIONAL MATCH (d)-[:HAS_CHUNK]->(c:Chunk)
                 DETACH DELETE c, d
                 """,
-                id=doc_id, ws=workspace,
+                id=doc_id,
+                ws=workspace,
             ).consume()
             session.run(
                 """
@@ -306,9 +312,7 @@ class GraphStore:
         _check_workspace(workspace)
         with self._driver.session(database=self._s.neo4j_database) as session:
             for label in ("Chunk", "Entity", "Document"):
-                session.run(
-                    f"MATCH (n:{label} {{workspace: $ws}}) DETACH DELETE n", ws=workspace
-                ).consume()
+                session.run(f"MATCH (n:{label} {{workspace: $ws}}) DETACH DELETE n", ws=workspace).consume()
 
     def stale_workspaces(self, older_than_days: float) -> list[str]:
         """Workspaces whose newest document is older than the cutoff."""
@@ -341,7 +345,9 @@ class GraphStore:
                 SET b.used = b.used + $amount
                 RETURN b.used AS used
                 """,
-                id=self._budget_id(kind), amount=amount, limit=limit,
+                id=self._budget_id(kind),
+                amount=amount,
+                limit=limit,
             ).single()
         return row is not None
 
@@ -353,7 +359,8 @@ class GraphStore:
                 MATCH (b:Budget {id: $id})
                 SET b.used = CASE WHEN b.used > $amount THEN b.used - $amount ELSE 0 END
                 """,
-                id=self._budget_id(kind), amount=amount,
+                id=self._budget_id(kind),
+                amount=amount,
             ).consume()
 
     def budget_remaining(self, kind: str, limit: int) -> int:
@@ -404,9 +411,7 @@ class GraphStore:
         ).consume()
 
     @staticmethod
-    def _tx_upsert_relationships(
-        tx: ManagedTransaction, rel_type: str, rows: list[dict[str, Any]]
-    ) -> None:
+    def _tx_upsert_relationships(tx: ManagedTransaction, rel_type: str, rows: list[dict[str, Any]]) -> None:
         # rel_type is validated against _REL_TYPE before reaching here.
         tx.run(
             f"""

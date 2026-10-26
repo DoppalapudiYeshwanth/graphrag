@@ -47,7 +47,7 @@ Abstract B:
 
 def pick_pairs(rows: list[dict], n: int, seed: int) -> list[tuple[str, str, str]]:
     """Choose up to n (entity, doc_a, doc_b) triples with every document used once."""
-    rng = random.Random(seed)
+    rng = random.Random(seed)  # noqa: S311  (reproducible sampling, not security)
     rows = [r for r in rows if len(r["entity"]) >= 4]
     rng.shuffle(rows)
     used: set[str] = set()
@@ -70,9 +70,8 @@ def main(n: int) -> None:
     model = s.answer_model or s.groq_model
 
     docs = load_corpus().set_index("doc_id")
-    with GraphStore() as store:
-        with store._driver.session(database=s.neo4j_database) as session:
-            rows = session.run(BRIDGE_QUERY, types=BRIDGE_TYPES).data()
+    with GraphStore() as store, store._driver.session(database=s.neo4j_database) as session:
+        rows = session.run(BRIDGE_QUERY, types=BRIDGE_TYPES).data()
     triples = pick_pairs(rows, n, s.random_seed)
     logger.info("Selected %d document pairs from %d candidate bridge entities", len(triples), len(rows))
 

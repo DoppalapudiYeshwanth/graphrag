@@ -134,7 +134,9 @@ def test_upload_rate_limit(settings_env) -> None:
     client, *_ = make_client(settings_env, UPLOAD_LIMIT_PER_HOUR="2")
     with client:
         client.get("/")
-        codes = [client.post("/api/upload", files={"file": ("a.txt", long_text())}).status_code for _ in range(3)]
+        codes = [
+            client.post("/api/upload", files={"file": ("a.txt", long_text())}).status_code for _ in range(3)
+        ]
     assert codes == [200, 200, 429]
 
 
@@ -254,7 +256,9 @@ def test_invalid_scope_is_rejected(settings_env) -> None:
     client, *_ = make_client(settings_env)
     with client:
         client.get("/")
-        assert client.post("/api/ask", json={"question": "What is X?", "scope": "everyone"}).status_code == 422
+        assert (
+            client.post("/api/ask", json={"question": "What is X?", "scope": "everyone"}).status_code == 422
+        )
 
 
 def test_question_budget_is_enforced_and_shared(settings_env) -> None:

@@ -42,5 +42,7 @@ if __name__ == "__main__":
             store.clear()
         store.setup_schema()
         store.upsert_chunks(chunks)
-        store.upsert_extractions({c.chunk_id: extractions[c.chunk_id] for c in chunks if c.chunk_id in extractions})
+        store.upsert_extractions(
+            {c.chunk_id: extractions[c.chunk_id] for c in chunks if c.chunk_id in extractions}
+        )
         logger.info("Graph stats: %s", store.stats())
