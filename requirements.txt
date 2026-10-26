@@ -13,4 +13,4 @@ pandas>=2.3
 scikit-learn>=1.7
 langchain-text-splitters>=1.1
 pypdf>=6.21
-streamlit>=1.65
+streamlit>=1.65.0
